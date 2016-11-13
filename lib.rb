@@ -56,14 +56,12 @@ module MPTCP
 
   class MptcpSubTupleIn6 < FFI::Struct
     layout  :id,   :uint8,
-            :prio, :uint8,
             :addr1, MptcpSockaddrIn6,
             :addr2, MptcpSockaddrIn6
   end
 
   class MptcpSubTupleIn < FFI::Struct
     layout  :id,   :uint8,
-            :prio, :uint8,
             :addr1, MptcpSockaddrIn,
             :addr2, MptcpSockaddrIn
   end
@@ -108,9 +106,20 @@ module MPTCP
   ############################################################################  
   
   def self.get_sub_tuple(sock)
-    getsockopt(sock.fileno, TCP_PROTO_NUM, MPTCP_CLOSE_SUB_ID,
-               optval.pointer, optlen.pointer)
- 
+    # We pass a MptcpSubTupleIn6, which is the largest struct that could be
+    # returned (the other option is MptcpSubTupleIn, with Ipv4 addresses).
+    optval = MptcpSubTupleIn6.new
+    optval[:id] = 1
+    socklen = Socklen_t.new
+    socklen[:val] = optval.size 
+    getsockopt(
+      sock.fileno,
+      TCP_PROTO_NUM,
+      MPTCP_GET_SUB_TUPLE,
+      optval.pointer,
+      socklen.pointer,
+    )
+
   end
 
 end
@@ -120,5 +129,5 @@ sock = TCPSocket.new('192.168.99.100', 8000)
 subs = MPTCP.get_sub_ids(sock)
 puts subs[:sub_count]
 puts subs[:sub_status][0][:id]
-# mptcp_close_sub_id(sock, 1, 1)
-puts MPTCP.close_subflow(sock, 1, 0)
+# puts MPTCP.close_subflow(sock, 1, 0)
+puts MPTCP.get_sub_tuple(sock)
