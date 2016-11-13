@@ -72,12 +72,13 @@ module MPTCP
     # In this case, we need to use the C getsockopt() function since the 
     # getsockopt() exposed by Ruby does not allow the optval to be passed as an
     # argument, but only returns an optval.
-    fd = sock.fileno
-    level = :IPPROTO_TCP
-    optname = MPTCP_OPEN_SUB_TUPLE
-    optval = mptcp_sub_tuple.pointer
-    optlen = mptcp_sub_tuple.size
-    getsockopt(fd, level, optname, optval, optlen) 
+    setsockopt(
+      sock.fileno,
+      TCP_PROTO_NUM,
+      MPTCP_OPEN_SUB_TUPLE,
+      mptcp_sub_tuple.pointer,
+      mptcp_sub_tuple.size
+    ) 
   end
   
   ############################################################################
@@ -107,6 +108,9 @@ module MPTCP
   ############################################################################  
   
   def self.get_sub_tuple(sock)
+    getsockopt(sock.fileno, TCP_PROTO_NUM, MPTCP_CLOSE_SUB_ID,
+               optval.pointer, optlen.pointer)
+ 
   end
 
 end
