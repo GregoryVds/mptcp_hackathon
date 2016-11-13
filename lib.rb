@@ -4,6 +4,9 @@ require 'ffi'
 module MPTCP
   extend FFI::Library
   TCP_PROTO_NUM=6
+  
+  AF_INET=2
+  AF_INET6=10
 
   MPTCP_GET_SUB_IDS=66      # Get subflows ids
   MPTCP_CLOSE_SUB_ID=67     # Close sub id
@@ -105,21 +108,32 @@ module MPTCP
   
   ############################################################################  
   
-  def self.get_sub_tuple(sock)
+  def self.get_sub_tuple(sock, id)
     # We pass a MptcpSubTupleIn6, which is the largest struct that could be
     # returned (the other option is MptcpSubTupleIn, with Ipv4 addresses).
     optval = MptcpSubTupleIn6.new
-    optval[:id] = 1
+    optval[:id] = id
     socklen = Socklen_t.new
     socklen[:val] = optval.size 
-    getsockopt(
+    rc = getsockopt(
       sock.fileno,
       TCP_PROTO_NUM,
       MPTCP_GET_SUB_TUPLE,
       optval.pointer,
       socklen.pointer,
     )
-
+    if rc == -1
+      puts("MPTCP_GET_SUB_TUPLE failed.")
+      return false
+    end
+    # At this point, the opval struct should be filled with sub_tuple info.
+    addr1 = optval[:addr1]
+    sockaddr = MptcpSockaddr.new
+    sockaddr.pointer.put_bytes(0, optval.pointer.get_bytes(1, sockaddr.size))
+    puts "Size:"+sockaddr.size.to_s
+    puts "Flowid:"+optval[:id].to_s
+    puts "sa_family"+sockaddr[:sa_family].to_s
+    puts "Sin_family"+optval[:addr1][:sin6_family].to_s
   end
 
 end
@@ -130,4 +144,4 @@ subs = MPTCP.get_sub_ids(sock)
 puts subs[:sub_count]
 puts subs[:sub_status][0][:id]
 # puts MPTCP.close_subflow(sock, 1, 0)
-puts MPTCP.get_sub_tuple(sock)
+puts MPTCP.get_sub_tuple(sock, 1)
