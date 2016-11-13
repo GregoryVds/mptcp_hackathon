@@ -1,5 +1,6 @@
 require 'socket'
 require 'ffi'
+require 'ipaddr'
 
 module MPTCP
   extend FFI::Library
@@ -20,7 +21,7 @@ module MPTCP
             :low_prio,   :uint16 
   end
 
-  class Subs < FFI::Struct
+  class SubIds < FFI::Struct
     layout :sub_count,  :uint8,
            :sub_status, [SubStatus, 256]
     # Since we don't know the size of the array in advance, we just set it to
@@ -31,20 +32,25 @@ module MPTCP
     # In this case, we can use the getsockopt method exposed by Ruby Socket 
     # class. No need to call underlying original C function.
     opt = sock.getsockopt(:IPPROTO_TCP, MPTCP_GET_SUB_IDS) 
-    memBuf = FFI::MemoryPointer.new(Subs).put_bytes(0, opt.data)
-    Subs.new(memBuf)
+    memBuf = FFI::MemoryPointer.new(SubIds).put_bytes(0, opt.data)
+    SubIds.new(memBuf)
   end
+
+  # Then, we can do:
+  # subs = get_sub_ids(sock)
+  # subs_count = subs[:sub_count]
+  # sub1_id = subs[1][:id]
 
   ############################################################################
 
-  class MptcpSockaddrIn < FFI::Struct
+  class SockaddrIn < FFI::Struct
     layout  :sin_family,  :short,
             :sin_port,    :ushort,
             :sin_addr,    :ulong,
             :sin_zero,    [:char, 8]
   end
 
-  class MptcpSockaddrIn6 < FFI::Struct
+  class SockaddrIn6 < FFI::Struct
     layout  :sin6_family,   :uint16,
             :sin6_port,     :uint16,
             :sin6_flowinfo, :uint32,
@@ -52,21 +58,21 @@ module MPTCP
             :sin6_scope_id, :uint32
   end
 
-  class MptcpSockaddr < FFI::Struct
+  class Sockaddr < FFI::Struct
     layout :sa_family, :ushort,
            :sa_data,   [:char, 14]
   end
 
-  class MptcpSubTupleIn6 < FFI::Struct
+  class SubTupleIn6 < FFI::Struct
     layout  :id,   :uint8,
-            :addr1, MptcpSockaddrIn6,
-            :addr2, MptcpSockaddrIn6
+            :addr1, SockaddrIn6,
+            :addr2, SockaddrIn6
   end
 
-  class MptcpSubTupleIn < FFI::Struct
+  class SubTupleIn < FFI::Struct
     layout  :id,   :uint8,
-            :addr1, MptcpSockaddrIn,
-            :addr2, MptcpSockaddrIn
+            :addr1, SockaddrIn,
+            :addr2, SockaddrIn
   end
  
   def self.open_subflow(sock, mptcp_sub_tuple)
@@ -105,13 +111,23 @@ module MPTCP
     getsockopt(sock.fileno, TCP_PROTO_NUM, MPTCP_CLOSE_SUB_ID,
                optval.pointer, optlen.pointer)
   end
+
   
   ############################################################################  
+    
+  attach_function :inet_ntop, [ :int, :pointer, :pointer, :int], :pointer
+
+  def self.print_inet(pointer)
+      str = FFI::MemoryPointer.new(:char, 16)
+      inet_ntop(AF_INET, pointer, str, 16)
+      puts str.read_string
   
+  end
+
   def self.get_sub_tuple(sock, id)
-    # We pass a MptcpSubTupleIn6, which is the largest struct that could be
-    # returned (the other option is MptcpSubTupleIn, with Ipv4 addresses).
-    optval = MptcpSubTupleIn6.new
+    # We pass a SubTupleIn6, which is the largest struct that could be
+    # returned (the other option is SubTupleIn, with Ipv4 addresses).
+    optval = SubTupleIn6.new
     optval[:id] = id
     socklen = Socklen_t.new
     socklen[:val] = optval.size 
@@ -122,26 +138,40 @@ module MPTCP
       optval.pointer,
       socklen.pointer,
     )
+    puts "Socklen: "+socklen[:val].to_s
     if rc == -1
       puts("MPTCP_GET_SUB_TUPLE failed.")
       return false
     end
     # At this point, the opval struct should be filled with sub_tuple info.
     addr1 = optval[:addr1]
-    sockaddr = MptcpSockaddr.new
+    sockaddr = Sockaddr.new
     sockaddr.pointer.put_bytes(0, optval.pointer.get_bytes(1, sockaddr.size))
-    puts "Size:"+sockaddr.size.to_s
-    puts "Flowid:"+optval[:id].to_s
-    puts "sa_family"+sockaddr[:sa_family].to_s
-    puts "Sin_family"+optval[:addr1][:sin6_family].to_s
+
+    if sockaddr[:sa_family] == AF_INET
+      addr2 = SockaddrIn.new
+      puts "size"+addr2.size.to_s
+      addr1.pointer.put_bytes(0, optval.pointer.get_bytes(1, addr1.size))
+      print_inet(addr1.pointer+4)
+
+      addr2 = SockaddrIn.new
+      addr2.pointer.put_bytes(0, optval.pointer.get_bytes(1+16, addr2.size))
+      print_inet(addr2.pointer+4)
+      
+      puts addr1.pointer+2     
+      puts addr2[:sin_port]
+    elsif sockaddr[:sa_family] == AF_INET6
+      puts("IPv6")
+    else
+      puts("Wrong sa_family")
+      return false
+    end
   end
-
 end
-
 
 sock = TCPSocket.new('192.168.99.100', 8000)
 subs = MPTCP.get_sub_ids(sock)
 puts subs[:sub_count]
 puts subs[:sub_status][0][:id]
 # puts MPTCP.close_subflow(sock, 1, 0)
-puts MPTCP.get_sub_tuple(sock, 1)
+pu:ts MPTCP.get_sub_tuple(sock, 1)
